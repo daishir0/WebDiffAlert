@@ -17,6 +17,7 @@ import argparse
 import smtplib
 import requests
 import json
+import chardet
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from email.mime.text import MIMEText
@@ -208,7 +209,31 @@ class LatestPageCatch:
                 
                 response.raise_for_status()
                 
-                html_content = response.text
+                # レスポンスのエンコーディングを取得
+                content_type = response.headers.get('Content-Type', '')
+                encoding = None
+                
+                # Content-Typeヘッダーからエンコーディングを取得
+                if 'charset=' in content_type:
+                    encoding = content_type.split('charset=')[-1].strip()
+                
+                # エンコーディングが指定されていない場合は自動検出
+                if not encoding:
+                    # レスポンスの内容からエンコーディングを検出
+                    result = chardet.detect(response.content)
+                    encoding = result['encoding']
+                    self.logger.debug(f"エンコーディングを検出: {encoding}, 信頼度: {result['confidence']}")
+                
+                # エンコーディングが検出できない場合はUTF-8を使用
+                if not encoding:
+                    encoding = 'utf-8'
+                
+                # 適切なエンコーディングでレスポンスの内容をデコード
+                try:
+                    html_content = response.content.decode(encoding, errors='replace')
+                except (LookupError, UnicodeDecodeError):
+                    # エンコーディングが無効な場合はUTF-8を使用
+                    html_content = response.content.decode('utf-8', errors='replace')
                 
                 # XPathが指定されている場合は該当部分を抽出
                 if xpath and xpath.strip():
@@ -251,11 +276,48 @@ class LatestPageCatch:
             # スクリプトタグとその内容を除去
             html_content = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html_content, flags=re.IGNORECASE)
             
-            # HTMLをバイト形式に変換してからパース
-            # エンコーディングを明示的に指定
-            html_bytes = html_content.encode('utf-8')
-            parser = html.HTMLParser(encoding='utf-8')
-            tree = html.fromstring(html_bytes, parser=parser)
+            # HTMLのエンコーディングを検出
+            if isinstance(html_content, str):
+                # 文字列の場合はバイト形式に変換
+                html_bytes = html_content.encode('utf-8', errors='replace')
+            else:
+                # すでにバイト形式の場合はそのまま使用
+                html_bytes = html_content
+            
+            # エンコーディングを検出
+            encoding = 'utf-8'
+            try:
+                # HTMLのメタタグからエンコーディングを取得
+                if b'charset=' in html_bytes:
+                    charset_match = re.search(b'charset=([^"\'\\s]+)', html_bytes)
+                    if charset_match:
+                        encoding = charset_match.group(1).decode('ascii', errors='replace')
+            except Exception:
+                pass
+            
+            # パーサーを作成してHTMLをパース
+            parser = html.HTMLParser(encoding=encoding)
+            try:
+                tree = html.fromstring(html_bytes, parser=parser)
+            except Exception as e:
+                self.logger.warning(f"HTMLのパースに失敗しました: {e}")
+                # 失敗した場合は別のエンコーディングを試す
+                try:
+                    # chardetを使用してエンコーディングを検出
+                    result = chardet.detect(html_bytes)
+                    detected_encoding = result['encoding']
+                    if detected_encoding and detected_encoding != encoding:
+                        self.logger.debug(f"別のエンコーディングを試行: {detected_encoding}")
+                        parser = html.HTMLParser(encoding=detected_encoding)
+                        tree = html.fromstring(html_bytes, parser=parser)
+                    else:
+                        # 最後の手段としてUTF-8を使用
+                        parser = html.HTMLParser(encoding='utf-8')
+                        tree = html.fromstring(html_bytes, parser=parser)
+                except Exception as e2:
+                    self.logger.error(f"HTMLのパースに再度失敗しました: {e2}")
+                    # テキストとして扱う
+                    return html_content if isinstance(html_content, str) else html_content.decode('utf-8', errors='replace')
             
             # スタイル、noscript、iframeを削除
             for element in tree.xpath('//style | //noscript | //iframe'):
