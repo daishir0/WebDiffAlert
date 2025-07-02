@@ -1,0 +1,52 @@
+# デバッグ設定
+debug: false
+
+# メール設定
+mail:
+  send: true  # メール送信フラグ
+  smtp_server: "smtp.gmail.com"
+  smtp_port: 587
+  user: "your-email@gmail.com"
+  password: "your-app-password"
+  from: "your-email@gmail.com"
+  to:
+    - "recipient1@example.com"
+    - "recipient2@example.com"
+
+# OpenAI設定
+openai:
+  api_key: "your-openai-api-key"
+  model: "gpt-4o-mini"
+  max_tokens: 1000
+  temperature: 0.7
+  translation_summary_prompt: |
+    以下の英文を日本語で要約してください。要約は500文字程度にまとめ、重要なポイントを漏らさないようにしてください。
+    
+    英文:
+    {text}
+
+# データ保存設定
+data_dir: "/path/to/data/directory"
+log_dir: "/path/to/log/directory"
+
+# ユーザーエージェント設定
+user_agents:
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15"
+  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0"
+  - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
+  - "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
+  - "Googlebot/2.1 (+http://www.google.com/bot.html)"
+  - "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+  - "Mozilla/5.0 (compatible; Bingbot/2.0; +http://www.bing.com/bingbot.htm)"
+
+# 監視対象サイト設定
+sites:
+  - name: "サイト名1"
+    url: "https://example.com/page1"
+    xpath: "//*[@id=\"content\"]"
+    user_agent: ""  # 成功したユーザーエージェントが自動的に設定される
+  - name: "サイト名2"
+    url: "https://example.com/page2"
+    xpath: "/html/body/div[1]/main/article"
+    user_agent: ""
