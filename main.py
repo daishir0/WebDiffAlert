@@ -18,6 +18,8 @@ import smtplib
 import requests
 import json
 import chardet
+import tempfile
+import shutil
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from email.mime.text import MIMEText
@@ -27,6 +29,15 @@ from email.header import Header
 from lxml import html
 from openai import OpenAI
 import difflib
+
+# Selenium関連のインポート
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
 
 
 class LatestPageCatch:
@@ -152,6 +163,33 @@ class LatestPageCatch:
         now = datetime.now()
         return now.strftime('%Y%m%d-%H%M%S')
     
+    def _xpath_to_css_selector(self, xpath: str) -> str:
+        """
+        XPathをCSSセレクタに変換する
+        
+        Args:
+            xpath: XPath
+            
+        Returns:
+            str: CSSセレクタ
+        """
+        # 基本的な変換
+        # 例: /html/body/div[1]/main/ul → body > div:nth-child(1) > main > ul
+        css_selector = xpath.replace('/html/', '')
+        
+        # 先頭の/を削除
+        if css_selector.startswith('/'):
+            css_selector = css_selector[1:]
+        
+        # /を>に置換
+        css_selector = css_selector.replace('/', ' > ')
+        
+        # [n]をnth-child(n)に置換
+        import re
+        css_selector = re.sub(r'\[(\d+)\]', r':nth-child(\1)', css_selector)
+        
+        return css_selector
+    
     def _get_formatted_date_for_subject(self) -> str:
         """
         日付をyyyy/MM/dd形式で取得する
@@ -162,9 +200,66 @@ class LatestPageCatch:
         now = datetime.now()
         return now.strftime('%Y/%m/%d')
     
-    def _fetch_html(self, url: str, xpath: str, user_agent: str = "") -> Tuple[str, str]:
+    def _setup_selenium_driver(self, user_agent: str = "") -> Tuple[webdriver.Chrome, str]:
         """
-        HTMLを取得する
+        Selenium WebDriverを設定して返します。
+        
+        Args:
+            user_agent: 使用するユーザーエージェント
+            
+        Returns:
+            Tuple[webdriver.Chrome, str]: WebDriverインスタンスと一時ディレクトリのパス
+        """
+        options = Options()
+        # 古い方法と新しい方法の両方を使用（互換性のため）
+        options.headless = True
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1366,768")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-infobars")
+        
+        # ログオプションを追加
+        options.add_argument('--enable-logging')
+        options.add_argument('--log-level=1')
+        
+        if user_agent:
+            options.add_argument(f"user-agent={user_agent}")
+        
+        # 一時ディレクトリを作成
+        temp_dir = tempfile.mkdtemp()
+        options.add_argument(f"--user-data-dir={temp_dir}")
+        
+        try:
+            # Chrome WebDriverのパスを設定ファイルから取得（デフォルト値を指定）
+            chrome_driver_path = self.config.get('selenium', {}).get('chrome_driver_path', '/usr/local/bin/chromedriver')
+            chrome_binary_path = self.config.get('selenium', {}).get('chrome_binary_path', '/usr/bin/google-chrome')
+            
+            options.binary_location = chrome_binary_path
+            service = Service(executable_path=chrome_driver_path)
+            
+            driver = webdriver.Chrome(service=service, options=options)
+            
+            # タイムアウト設定
+            page_load_timeout = self.config.get('selenium', {}).get('page_load_timeout', 30)
+            implicit_wait = self.config.get('selenium', {}).get('implicit_wait', 10)
+            
+            driver.set_page_load_timeout(page_load_timeout)
+            driver.implicitly_wait(implicit_wait)
+            
+            self.logger.debug("Chrome WebDriverを初期化しました")
+            return driver, temp_dir
+        except Exception as e:
+            self.logger.error(f"Chrome WebDriverの初期化に失敗しました: {e}")
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+    
+    def _fetch_html_with_selenium(self, url: str, xpath: str, user_agent: str = "") -> Tuple[str, str]:
+        """
+        SeleniumでHTMLを取得します。JavaScriptが実行された後のコンテンツを取得できます。
         
         Args:
             url: URL
@@ -174,8 +269,126 @@ class LatestPageCatch:
         Returns:
             Tuple[str, str]: (HTML, 使用したユーザーエージェント)
         """
+        driver = None
+        temp_dir = None
+        
+        try:
+            # WebDriverの初期化
+            driver, temp_dir = self._setup_selenium_driver(user_agent)
+            
+            # ページにアクセス（タイムアウトが発生しても途中までのHTMLを取得）
+            self.logger.info(f"Seleniumでページにアクセスしています: {url}")
+            
+            # タイムアウト時間を短めに設定（CNNなどの重いサイト対策）
+            page_load_timeout = self.config.get('selenium', {}).get('page_load_timeout', 30)
+            driver.set_page_load_timeout(page_load_timeout)
+            
+            try:
+                driver.get(url)
+                
+                # ページが完全に読み込まれるまで待機
+                wait_time = self.config.get('selenium', {}).get('wait_time', 5)
+                
+                WebDriverWait(driver, 15).until(
+                    lambda d: d.execute_script('return document.readyState') == 'complete'
+                )
+                self.logger.debug("ページが完全に読み込まれました")
+            except Exception as e:
+                self.logger.warning(f"ページ読み込み中にタイムアウトが発生しました: {e}")
+                self.logger.info("タイムアウトが発生しましたが、途中までのHTMLを取得します")
+                # タイムアウトが発生しても処理を続行
+            
+            # 2回だけ下にスクロール（動的コンテンツの読み込みのため）
+            self.logger.debug("2回だけ下にスクロールしています...")
+            
+            # 1回目のスクロール
+            driver.execute_script("window.scrollBy(0, window.innerHeight);")
+            time.sleep(1)  # コンテンツがロードされるのを待つ（短縮）
+            
+            # 2回目のスクロール
+            driver.execute_script("window.scrollBy(0, window.innerHeight);")
+            time.sleep(1)  # コンテンツがロードされるのを待つ（短縮）
+            
+            # 追加の待機時間を短縮
+            time.sleep(1)
+            
+            # ページソースを取得
+            html_content = driver.page_source
+            
+            # XPathが指定されている場合は該当部分を抽出
+            if xpath and xpath.strip():
+                try:
+                    # wcag_link_purpose_checker.pyを参考にした処理
+                    # ページソースを取得してからBeautifulSoupで解析
+                    from bs4 import BeautifulSoup
+                    
+                    # ページソースを取得（JavaScriptが実行された後の状態）
+                    html_content = driver.page_source
+                    
+                    # BeautifulSoupでHTMLを解析
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # XPathをCSSセレクタに変換して要素を検索
+                    # 例: /html/body/div[1]/main/ul → body > div:nth-child(1) > main > ul
+                    css_selector = self._xpath_to_css_selector(xpath)
+                    self.logger.debug(f"CSSセレクタに変換: {css_selector}")
+                    
+                    element = soup.select_one(css_selector)
+                    if element:
+                        html_content = str(element)
+                        self.logger.debug(f"BeautifulSoupによる要素抽出成功")
+                    else:
+                        # 簡略化したセレクタで再試行
+                        simplified_selector = css_selector.split('>')[-1].strip()
+                        self.logger.debug(f"簡略化したCSSセレクタで再試行: {simplified_selector}")
+                        
+                        elements = soup.select(simplified_selector)
+                        if elements:
+                            html_content = str(elements[0])
+                            self.logger.debug(f"簡略化したCSSセレクタによる要素抽出成功")
+                        else:
+                            self.logger.warning(f"要素が見つかりませんでした。ページ全体を使用します。")
+                except Exception as e:
+                    self.logger.error(f"要素抽出中にエラーが発生しました: {e}")
+            
+            self.logger.info(f"Seleniumでのページ取得に成功しました: {url}")
+            return html_content, user_agent
+            
+        except Exception as e:
+            self.logger.error(f"Seleniumでのページ取得に失敗しました: {url}, エラー: {e}")
+            raise
+        finally:
+            # WebDriverを終了
+            if driver:
+                try:
+                    driver.quit()
+                except Exception as e:
+                    self.logger.warning(f"WebDriverの終了中にエラーが発生しました: {e}")
+            
+            # 一時ディレクトリを削除
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+    
+    def _fetch_html(self, url: str, xpath: str, user_agent: str = "", use_selenium: bool = False) -> Tuple[str, str]:
+        """
+        HTMLを取得する
+        
+        Args:
+            url: URL
+            xpath: XPath
+            user_agent: ユーザーエージェント
+            use_selenium: Seleniumを使用するかどうか
+            
+        Returns:
+            Tuple[str, str]: (HTML, 使用したユーザーエージェント)
+        """
         self.logger.info(f"HTMLを取得します: {url}")
         
+        # Seleniumを使用する場合
+        if use_selenium:
+            return self._fetch_html_with_selenium(url, xpath, user_agent)
+        
+        # 以下は既存のrequestsを使用した実装
         # ユーザーエージェントの準備
         user_agents = self.config.get('user_agents', [])
         if user_agent:
@@ -650,11 +863,14 @@ class LatestPageCatch:
             self.logger.info(f"サイトの処理を開始します: {site_name}, URL: {url}")
             
             try:
+                # Seleniumを使用するかどうかを判断
+                use_selenium = site.get('use_selenium', self.config.get('selenium', {}).get('enabled', False))
+                
                 # HTMLを取得
-                html_content, used_agent = self._fetch_html(url, xpath, user_agent)
+                html_content, used_agent = self._fetch_html(url, xpath, user_agent, use_selenium=use_selenium)
                 
                 # 成功したユーザーエージェントが設定と異なる場合は設定を更新
-                if user_agent != used_agent:
+                if user_agent != used_agent and not use_selenium:
                     self._update_config_with_user_agent(site_name, url, xpath, used_agent)
                 
                 # HTMLを保存
