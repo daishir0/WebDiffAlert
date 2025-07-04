@@ -77,6 +77,7 @@ sudo systemctl status webdiffalert.timer
 - The first run will only save the current state of websites. Differences will be detected from the second run onwards.
 - For English content, the program uses OpenAI to generate Japanese summaries. Make sure your OpenAI API key is valid.
 - The program uses multiple user agents to try accessing websites that might block certain user agents.
+- **Selenium Integration**: The tool now supports websites with dynamic content loaded by JavaScript. By setting `use_selenium: true` in the site configuration, WebDiffAlert will use a headless browser to render the page with JavaScript before capturing the content.
 - All data is stored in the `data` directory, and logs are stored in the `log` directory.
 
 ## License
@@ -163,6 +164,7 @@ sudo systemctl status webdiffalert.timer
 - 初回実行時は、Webサイトの現在の状態が保存されるだけです。差分は2回目以降の実行で検出されます。
 - 英語コンテンツの場合、プログラムはOpenAIを使用して日本語の要約を生成します。OpenAI APIキーが有効であることを確認してください。
 - プログラムは複数のユーザーエージェントを使用して、特定のユーザーエージェントをブロックする可能性のあるWebサイトへのアクセスを試みます。
+- **Seleniumの統合**: このツールは、JavaScriptによって読み込まれる動的コンテンツを持つWebサイトをサポートするようになりました。サイト設定で`use_selenium: true`を設定することで、WebDiffAlertはコンテンツをキャプチャする前にヘッドレスブラウザでJavaScriptを実行してページをレンダリングします。
 - すべてのデータは`data`ディレクトリに保存され、ログは`log`ディレクトリに保存されます。
 
 ## ライセンス
