@@ -349,8 +349,15 @@ class LatestPageCatch:
             file_path: 保存先ファイルパス
         """
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(html_content)
+            # 文字列の場合はエンコードしてバイナリに変換
+            if isinstance(html_content, str):
+                content_bytes = html_content.encode('utf-8', errors='replace')
+            else:
+                content_bytes = html_content
+                
+            # バイナリモードで保存
+            with open(file_path, 'wb') as f:
+                f.write(content_bytes)
             self.logger.debug(f"HTMLをファイルに保存しました: {file_path}")
         except Exception as e:
             self.logger.error(f"HTMLの保存に失敗しました: {file_path}, エラー: {e}")
