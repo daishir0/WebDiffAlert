@@ -534,21 +534,75 @@ class LatestPageCatch:
             
             # スタイル、noscript、iframeを削除
             for element in tree.xpath('//style | //noscript | //iframe'):
-                element.getparent().remove(element)
-            
-            # テキストを抽出し、適切にデコード
-            texts = []
-            for text_element in tree.xpath('//text()'):
-                if text_element.strip():
-                    texts.append(text_element.strip())
-            
-            # テキストを結合
-            text = ' '.join(texts)
-            
-            # 余分な空白を削除
-            text = re.sub(r'\s+', ' ', text).strip()
-            
-            return text
+                parent = element.getparent()
+                if parent is not None:
+                    parent.remove(element)
+
+            # ブロック要素ごとに改行を入れて抽出
+            block_tags = {
+                'p', 'li', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                'article', 'section', 'header', 'footer', 'nav', 'aside', 'main',
+                'div', 'pre', 'blockquote', 'address', 'dt', 'dd', 'figure', 'figcaption',
+                'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td'
+            }
+
+            def find_block_ancestor(el):
+                cur = el
+                while cur is not None and hasattr(cur, 'tag'):
+                    tag = cur.tag.lower() if isinstance(cur.tag, str) else ''
+                    if tag in block_tags:
+                        return cur
+                    cur = cur.getparent()
+                return el  # フォールバック
+
+            lines = []
+            current_key = None
+            buf = []
+
+            for text_node in tree.xpath('//text()'):
+                if not isinstance(text_node, str):
+                    # lxml returns _ElementUnicodeResult which behaves like str
+                    text_value = str(text_node)
+                else:
+                    text_value = text_node
+
+                s = text_value.strip()
+                if not s:
+                    continue
+
+                parent = text_node.getparent() if hasattr(text_node, 'getparent') else None
+                key = find_block_ancestor(parent) if parent is not None else None
+
+                if key is current_key:
+                    buf.append(s)
+                else:
+                    if buf:
+                        line = ' '.join(buf)
+                        line = re.sub(r'\s+', ' ', line).strip()
+                        if line:
+                            lines.append(line)
+                    current_key = key
+                    buf = [s]
+
+            # 末尾バッファを確定
+            if buf:
+                line = ' '.join(buf)
+                line = re.sub(r'\s+', ' ', line).strip()
+                if line:
+                    lines.append(line)
+
+            # 連続重複行や極端に短いノイズの除去（しきい値は控えめ）
+            cleaned = []
+            prev = None
+            for line in lines:
+                if line == prev:
+                    continue
+                if len(line) <= 1:
+                    continue
+                cleaned.append(line)
+                prev = line
+
+            return '\n'.join(cleaned)
         except Exception as e:
             self.logger.error(f"テキスト抽出中にエラーが発生しました: {e}")
             return ""
@@ -626,25 +680,44 @@ class LatestPageCatch:
                 self.logger.debug("差分なし（完全一致）")
                 return ""
             
-            # 差分を取得
-            diff = difflib.unified_diff(
-                text2.splitlines(),
-                text1.splitlines(),
-                lineterm=''
-            )
-            
-            # 追加された行のみを抽出
-            added_lines = []
-            for line in diff:
-                if line.startswith('+') and not line.startswith('+++'):
-                    added_lines.append(line[1:])
-            
-            # 追加された行がない場合は空文字を返す
-            if not added_lines:
-                self.logger.debug("差分なし（追加行なし）")
+            # 行単位の差分（置換は語単位で最小化）
+            old_lines = text2.splitlines()
+            new_lines = text1.splitlines()
+
+            sm = difflib.SequenceMatcher(a=old_lines, b=new_lines)
+            results = []
+
+            for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                if tag == 'equal' or tag == 'delete':
+                    continue
+                if tag == 'insert':
+                    for ln in new_lines[j1:j2]:
+                        if ln.strip():
+                            results.append(ln)
+                elif tag == 'replace':
+                    o_chunk = old_lines[i1:i2]
+                    n_chunk = new_lines[j1:j2]
+                    maxlen = max(len(o_chunk), len(n_chunk))
+                    for k in range(maxlen):
+                        o_line = o_chunk[k] if k < len(o_chunk) else ''
+                        n_line = n_chunk[k] if k < len(n_chunk) else ''
+                        if not n_line.strip():
+                            continue
+                        o_words = o_line.split()
+                        n_words = n_line.split()
+                        wsm = difflib.SequenceMatcher(a=o_words, b=n_words)
+                        added_words = []
+                        for wtag, wi1, wi2, wj1, wj2 in wsm.get_opcodes():
+                            if wtag in ('insert', 'replace'):
+                                added_words.extend(n_words[wj1:wj2])
+                        if added_words:
+                            results.append(' '.join(added_words))
+
+            if not results:
+                self.logger.debug("差分なし（追加部分抽出後）")
                 return ""
-            
-            return '\n'.join(added_lines)
+
+            return '\n'.join(results)
             
         except Exception as e:
             self.logger.error(f"差分比較中にエラーが発生しました: {e}")
