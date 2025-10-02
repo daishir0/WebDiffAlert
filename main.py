@@ -750,6 +750,23 @@ class LatestPageCatch:
         
         # アルファベット文字が半分以上であれば英語文書と判定
         return alpha_count / total_count > 0.5
+
+    def _head_lines(self, text: str, n: int = 10) -> str:
+        """
+        テキストの冒頭N行を取得（N行を超える場合は末尾に省略記号を付与）
+        
+        Args:
+            text: 元テキスト
+            n: 取得する行数
+        
+        Returns:
+            str: 冒頭N行のテキスト（必要に応じて"..."付与）
+        """
+        lines = text.splitlines()
+        head = '\n'.join(lines[:n])
+        if len(lines) > n:
+            head += '\n...'
+        return head
     
     def _translate_and_summarize(self, text: str) -> str:
         """
@@ -963,14 +980,20 @@ class LatestPageCatch:
                         # 英語文書かどうかを判定
                         is_english = self._is_english_text(diff_text)
                         
-                        # 英語文書の場合は和訳要約を生成
+                        # 英文時は冒頭N行のみ本文表示（既定10行）。要約は全文から生成。
+                        preview_lines = self.config.get('mail', {}).get('english_preview_lines', 10)
+                        display_text = self._head_lines(diff_text, preview_lines) if is_english else diff_text
+
+                        # 英語文書の場合は和訳要約を全文から生成
                         translation_summary = ""
                         if is_english:
                             self.logger.info(f"英語文書を検出しました: {site_name}")
                             translation_summary = self._translate_and_summarize(diff_text)
                         
                         # 更新テキストを作成
-                        update_text += f"\n## {site_name}\n{url}\n\n{diff_text}\n"
+                        update_text += f"\n## {site_name}\n{url}\n\n{display_text}\n"
+                        if is_english:
+                            update_text += f"\n(英語本文は冒頭{preview_lines}行のみ表示)\n"
                         
                         # 和訳要約がある場合は追加
                         if translation_summary:

@@ -12,6 +12,8 @@ mail:
   to:
     - "recipient1@example.com"
     - "recipient2@example.com"
+  # 英文検出時に本文として表示する冒頭行数（デフォルト10）
+  english_preview_lines: 10
 
 # OpenAI設定
 openai:

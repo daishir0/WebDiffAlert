@@ -79,6 +79,7 @@ sudo systemctl status webdiffalert.timer
 - The program uses multiple user agents to try accessing websites that might block certain user agents.
 - **Selenium Integration**: The tool now supports websites with dynamic content loaded by JavaScript. By setting `use_selenium: true` in the site configuration, WebDiffAlert will use a headless browser to render the page with JavaScript before capturing the content.
 - All data is stored in the `data` directory, and logs are stored in the `log` directory.
+ - **English Preview in Emails**: When the detected difference is English, only the first N lines (default 10) of the English text are included in the email body, and the Japanese summary is generated from the full text. You can change the number of lines via `mail.english_preview_lines` in `config.yaml`.
 
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
@@ -166,6 +167,7 @@ sudo systemctl status webdiffalert.timer
 - プログラムは複数のユーザーエージェントを使用して、特定のユーザーエージェントをブロックする可能性のあるWebサイトへのアクセスを試みます。
 - **Seleniumの統合**: このツールは、JavaScriptによって読み込まれる動的コンテンツを持つWebサイトをサポートするようになりました。サイト設定で`use_selenium: true`を設定することで、WebDiffAlertはコンテンツをキャプチャする前にヘッドレスブラウザでJavaScriptを実行してページをレンダリングします。
 - すべてのデータは`data`ディレクトリに保存され、ログは`log`ディレクトリに保存されます。
+ - **英文プレビュー**: 差分が英語と判定された場合、メール本文には英語テキストの冒頭N行（既定10行）のみを表示し、和訳要約は全文を元に生成します。行数は `config.yaml` の `mail.english_preview_lines` で変更可能です。
 
 ## ライセンス
 このプロジェクトはMITライセンスの下でライセンスされています。詳細はLICENSEファイルを参照してください。
